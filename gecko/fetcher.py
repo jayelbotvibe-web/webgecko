@@ -62,7 +62,14 @@ class Response:
             content = resp.content
             if not content or not content.strip():
                 content = f"<html><body>HTTP {resp.status_code}</body></html>".encode()
-            self.page = Page(content, url=resp.url, encoding=encoding)
+            try:
+                self.page = Page(content, url=resp.url, encoding=encoding)
+            except ValueError:
+                # XML with encoding declaration — strip and retry
+                import re
+                text = content if isinstance(content, str) else content.decode(encoding, errors="replace")
+                text = re.sub(r'<\?xml[^?]*\?>', '', text, count=1)
+                self.page = Page(text if isinstance(content, str) else text.encode(), url=resp.url, encoding=encoding)
             self.json = None
 
     def __repr__(self) -> str:

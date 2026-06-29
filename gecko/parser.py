@@ -26,14 +26,21 @@ class Page:
     def __init__(self, content: str | bytes, url: str = "", encoding: str = "utf-8"):
         self.url = url
         self.encoding = encoding
+        if content is None:
+            content = "<html></html>"
         if isinstance(content, bytes):
             content = content.decode(encoding, errors="replace")
+        if not content.strip():
+            content = "<html></html>"
         self._root = document_fromstring(content, parser=HTMLParser(encoding=encoding))
 
     def css(self, selector: str) -> Elements:
         m = _PSEUDO.search(selector)
-        if not m:
-            return self.xpath(_translator.css_to_xpath(selector))
+        try:
+            if not m:
+                return self.xpath(_translator.css_to_xpath(selector))
+        except Exception as e:
+            raise ValueError(f"Bad selector: {selector}") from e
 
         kind = m.group(1)
         base_css = selector[:m.start()]
@@ -162,7 +169,10 @@ class Elements:
                 continue
             row = {}
             for key, selector in fields.items():
-                val = item.css(selector).get()
+                try:
+                    val = item.css(selector).get()
+                except ValueError:
+                    val = None
                 row[key] = val
             results.append(row)
 

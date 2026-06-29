@@ -196,6 +196,27 @@ class TestParser:
         assert items[0]["name"] == "Widget A"
         assert items[0]["nope"] is None
 
+    def test_extract_bad_selector(self):
+        """extract survives invalid CSS selectors."""
+        page = Page(HTML)
+        items = page.css(".product").extract({"name": ".title::text", "bad": "!!!"})
+        assert items[0]["name"] == "Widget A"
+        assert items[0]["bad"] is None
+
+    def test_empty_content(self):
+        """Page handles empty, whitespace-only, and None content."""
+        for content in ["", "   ", b""]:
+            p = Page(content)
+            assert p.tag == "html"
+
+    def test_bad_css_raises_valueerror(self):
+        """Invalid CSS raises ValueError, not raw SelectorSyntaxError."""
+        page = Page(HTML)
+        with pytest.raises(ValueError):
+            page.css("!!!bad!!!")
+        with pytest.raises(ValueError):
+            page.css("")
+
 
 class TestXPathEscape:
     def test_no_quotes(self):
