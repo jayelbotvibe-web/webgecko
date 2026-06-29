@@ -6,6 +6,7 @@ from typing import Any
 
 import anyio
 from curl_cffi import requests as curl_requests
+from curl_cffi.curl import CurlError
 from curl_cffi.requests import BrowserTypeLiteral
 
 from gecko.parser import Page
@@ -28,6 +29,21 @@ def _headers(overrides: dict | None = None) -> dict:
     return dict(_HEADERS, **overrides)
 
 
+def _retry(fn, retries: int = 3, delay: float = 1.0, async_mode: bool = False):
+    """Retry on connection errors only. HTTP errors (4xx, 5xx) pass through."""
+    sleep_fn = anyio.sleep if async_mode else time.sleep
+    last_err = None
+    for attempt in range(retries + 1):
+        try:
+            return fn()
+        except CurlError as e:
+            last_err = e
+            if attempt < retries:
+                sleep_fn(delay * (2 ** attempt))
+        # HTTP errors, JSON parse errors, etc. — don't retry
+    raise last_err  # type: ignore[misc]
+
+
 class Response:
     __slots__ = ("status", "url", "headers", "cookies", "page", "json")
 
@@ -43,7 +59,10 @@ class Response:
             self.page = Page("<html></html>")
             self.json = resp.json()
         else:
-            self.page = Page(resp.content, url=resp.url, encoding=encoding)
+            content = resp.content
+            if not content or not content.strip():
+                content = f"<html><body>HTTP {resp.status_code}</body></html>".encode()
+            self.page = Page(content, url=resp.url, encoding=encoding)
             self.json = None
 
     def __repr__(self) -> str:
@@ -90,19 +109,9 @@ class Session:
         s = self._session or curl_requests.Session(impersonate=self._impersonate, timeout=self._timeout)
         kwargs.setdefault("headers", _headers(kwargs.get("headers")))
         kwargs.setdefault("allow_redirects", True)
-
-        last_err = None
-        for attempt in range(self._retries + 1):
-            try:
-                resp = s.request(method, url, **kwargs)
-                resp.raise_for_status()
-                return Response(resp)
-            except Exception as e:
-                last_err = e
-                if attempt < self._retries:
-                    time.sleep(self._retry_delay * (2 ** attempt))
-
-        raise last_err  # type: ignore[misc]
+        resp = _retry(lambda: s.request(method, url, **kwargs), self._retries, self._retry_delay)
+        resp.raise_for_status()
+        return Response(resp)
 
 
 class AsyncSession(Session):
@@ -136,26 +145,23 @@ class AsyncSession(Session):
             s = CurlAsync(impersonate=self._impersonate, timeout=self._timeout)
         kwargs.setdefault("headers", _headers(kwargs.get("headers")))
         kwargs.setdefault("allow_redirects", True)
-
-        last_err = None
-        for attempt in range(self._retries + 1):
-            try:
-                resp = await s.request(method, url, **kwargs)
-                resp.raise_for_status()
-                return Response(resp)
-            except Exception as e:
-                last_err = e
-                if attempt < self._retries:
-                    await anyio.sleep(self._retry_delay * (2 ** attempt))
-
-        raise last_err  # type: ignore[misc]
+        resp = await _retry(
+            lambda: s.request(method, url, **kwargs),  # noqa: ASYNC101
+            self._retries, self._retry_delay, async_mode=True,
+        )
+        resp.raise_for_status()
+        return Response(resp)
 
 
 def fetch(url: str, *, impersonate: BrowserTypeLiteral | str = "chrome131",
-          timeout: float = 30, headers: dict | None = None, **kwargs) -> Response:
+          timeout: float = 30, retries: int = 3, retry_delay: float = 1.0,
+          headers: dict | None = None, **kwargs) -> Response:
     s = curl_requests.Session(impersonate=impersonate, timeout=timeout)
     try:
-        resp = s.get(url, headers=_headers(headers), allow_redirects=True, **kwargs)
+        resp = _retry(
+            lambda: s.get(url, headers=_headers(headers), allow_redirects=True, **kwargs),
+            retries, retry_delay,
+        )
         return Response(resp)
     finally:
         s.close()

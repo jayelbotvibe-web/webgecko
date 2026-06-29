@@ -1,3 +1,5 @@
+import time
+
 import pytest
 from gecko.parser import Page, _escape_xpath_str
 from gecko.fetcher import fetch, Session
@@ -98,6 +100,34 @@ class TestParser:
         ids = [e.attr("id") for e in page.css(".product")]
         assert ids == ["p1", "p2"]
 
+    def test_parent(self):
+        page = Page(HTML)
+        h2 = page.css("h2")[0]
+        assert h2.parent is not None
+        assert h2.parent.tag == "div"
+        assert h2.parent.attr("class") == "product"
+
+    def test_parent_of_root(self):
+        page = Page("<p>hi</p>")
+        p = page.css("p")[0]
+        assert p.parent is not None  # body
+        assert p.parent.parent is not None  # html
+
+    def test_children(self):
+        page = Page(HTML)
+        product = page.css(".product")[0]
+        kids = product.children
+        assert len(kids) == 3  # h2, span, a
+        assert kids[0].tag == "h2"
+
+    def test_siblings(self):
+        page = Page(HTML)
+        h2 = page.css("h2")[0]
+        assert h2.next_sibling is not None
+        assert h2.next_sibling.tag == "span"
+        assert h2.next_sibling.next_sibling is not None  # a
+        assert h2.prev_sibling is None  # first child
+
     def test_pseudo_text(self):
         page = Page(HTML)
         titles = page.css(".title::text")
@@ -197,9 +227,16 @@ class TestFetcher:
         r = fetch("https://httpbin.org/html")
         assert r.page.css("h1")[0].text
 
-    def test_fetch_404(self):
+    def test_fetch_returns_404(self):
+        """fetch() returns response for all status codes — agent decides."""
+        r = fetch("https://httpbin.org/status/404")
+        assert r.status == 404
+
+    def test_session_raises_on_404(self):
+        """Session raises on HTTP errors — crawlers need this."""
         with pytest.raises(Exception):
-            fetch("https://httpbin.org/status/404")
+            with Session() as s:
+                s.get("https://httpbin.org/status/404")
 
     def test_session_headers(self):
         with Session() as s:
@@ -219,8 +256,8 @@ class TestFetcher:
 
 
 class TestGecko:
-    def test_basic_spider(self):
-        from gecko.weaver import Gecko
+    def test_basic(self):
+        from gecko.crawler import Gecko
         from gecko.fetcher import Response
 
         class TestGecko(Gecko):
@@ -230,13 +267,13 @@ class TestGecko:
             def parse(self, response: Response):
                 yield {"title": response.page.css("h1")[0].text}
 
-        spider = TestGecko().run()
-        assert spider.stats.pages_crawled == 1
-        assert len(spider.items) == 1
-        assert "Moby" in spider.items[0]["title"]
+        g = TestGecko().run()
+        assert g.stats.pages_crawled == 1
+        assert len(g.items) == 1
+        assert "Moby" in g.items[0]["title"]
 
-    def test_spider_save(self, tmp_path):
-        from gecko.weaver import Gecko
+    def test_save(self, tmp_path):
+        from gecko.crawler import Gecko
         from gecko.fetcher import Response
 
         class TestGecko(Gecko):
@@ -246,16 +283,16 @@ class TestGecko:
             def parse(self, response: Response):
                 yield {"title": response.page.css("h1")[0].text}
 
-        spider = TestGecko().run()
+        g = TestGecko().run()
         path = str(tmp_path / "test.json")
-        n = spider.save(path)
+        n = g.save(path)
         assert n == 1
         import json
         with open(path) as f:
             assert json.load(f)[0]["title"]
 
-    def test_spider_save_jsonl(self, tmp_path):
-        from gecko.weaver import Gecko
+    def test_save_jsonl(self, tmp_path):
+        from gecko.crawler import Gecko
         from gecko.fetcher import Response
 
         class TestGecko(Gecko):
@@ -265,8 +302,55 @@ class TestGecko:
             def parse(self, response: Response):
                 yield {"title": response.page.css("h1")[0].text}
 
-        spider = TestGecko().run()
+        g = TestGecko().run()
         path = str(tmp_path / "test.jsonl")
-        n = spider.save_jsonl(path)
+        n = g.save_jsonl(path)
         assert n == 1
         assert open(path).read().strip()
+
+    def test_max_pages(self):
+        from gecko.crawler import Gecko
+        from gecko.fetcher import Response
+
+        class TestGecko(Gecko):
+            start_urls = ["https://httpbin.org/html", "https://httpbin.org/get"]
+            concurrency = 1
+            max_pages = 1
+
+            def parse(self, response: Response):
+                yield {"url": response.url}
+
+        g = TestGecko().run()
+        assert g.stats.pages_crawled <= 2
+        assert g.stats.skipped >= 0
+
+    def test_stream(self):
+        from gecko.crawler import Gecko
+        from gecko.fetcher import Response
+        import asyncio
+
+        items_received = []
+
+        class TestGecko(Gecko):
+            start_urls = ["https://httpbin.org/html"]
+            concurrency = 1
+
+            def parse(self, response: Response):
+                yield {"title": response.page.css("h1")[0].text}
+
+        async def collect():
+            g = TestGecko()
+            async for item in g.stream():
+                items_received.append(item)
+
+        asyncio.run(collect())
+        assert len(items_received) == 1
+        assert "Moby" in items_received[0]["title"]
+
+    def test_fetch_404_fast(self):
+        """404 should not retry — agents get instant feedback."""
+        start = time.monotonic()
+        r = fetch("https://httpbin.org/status/404")
+        elapsed = time.monotonic() - start
+        assert r.status == 404
+        assert elapsed < 5  # not 14s of retries

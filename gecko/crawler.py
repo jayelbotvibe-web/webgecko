@@ -1,4 +1,4 @@
-"""Gecko — simple concurrent web crawler."""
+"""Gecko — simple concurrent web crawler with streaming support."""
 from __future__ import annotations
 
 import json
@@ -6,7 +6,7 @@ import time
 from abc import ABC
 from asyncio import Queue, TaskGroup, sleep, run as asyncio_run
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import AsyncIterator, Callable
 
 from gecko.fetcher import Response, AsyncSession
 
@@ -18,6 +18,7 @@ class CrawlStats:
     pages_crawled: int = 0
     items_scraped: int = 0
     errors: int = 0
+    skipped: int = 0
     duration_seconds: float = 0.0
     start_time: float = field(default_factory=time.monotonic)
 
@@ -42,14 +43,38 @@ class Gecko(ABC):
         asyncio_run(self._run())
         return self
 
+    async def stream(self) -> AsyncIterator[dict]:
+        """Run and yield items as they're scraped."""
+        from anyio import create_memory_object_stream
+        send, recv = create_memory_object_stream[dict](max_buffer_size=100)
+
+        async def run_and_send():
+            try:
+                await self._crawl(send)
+            finally:
+                await send.aclose()
+
+        async with TaskGroup() as tg:
+            tg.create_task(run_and_send())
+            async for item in recv:
+                yield item
+
+        self.stats.finish()
+
     async def _run(self) -> None:
+        async for _ in self.stream():
+            pass
+
+    async def _crawl(self, item_send=None) -> None:
         queue: Queue = Queue()
+        stopped = False
 
         for url in self.start_urls:
             self._seen.add(url)
             queue.put_nowait((url, self.parse))
 
         async def worker(session: AsyncSession):
+            nonlocal stopped
             while True:
                 item = await queue.get()
                 if item is _SENTINEL:
@@ -58,11 +83,13 @@ class Gecko(ABC):
 
                 url, callback = item
 
-                try:
-                    if self.max_pages and self.stats.pages_crawled >= self.max_pages:
-                        queue.task_done()
-                        continue
+                if stopped or (self.max_pages and self.stats.pages_crawled >= self.max_pages):
+                    stopped = True
+                    self.stats.skipped += 1
+                    queue.task_done()
+                    continue
 
+                try:
                     response = await session.get(url)
                     self.stats.pages_crawled += 1
                 except Exception:
@@ -75,14 +102,16 @@ class Gecko(ABC):
 
                 if callback:
                     try:
-                        for item in callback(response):
-                            if isinstance(item, Request):
-                                if item.url not in self._seen:
-                                    self._seen.add(item.url)
-                                    queue.put_nowait((item.url, item.callback))
-                            elif isinstance(item, dict):
-                                self._items.append(item)
+                        for result in callback(response):
+                            if isinstance(result, Request):
+                                if result.url not in self._seen:
+                                    self._seen.add(result.url)
+                                    queue.put_nowait((result.url, result.callback))
+                            elif isinstance(result, dict):
+                                self._items.append(result)
                                 self.stats.items_scraped += 1
+                                if item_send is not None:
+                                    await item_send.send(result)
                     except Exception:
                         self.stats.errors += 1
 
@@ -94,8 +123,6 @@ class Gecko(ABC):
                 await queue.join()
                 for _ in tasks:
                     queue.put_nowait(_SENTINEL)
-
-        self.stats.finish()
 
     @property
     def items(self) -> list[dict]:

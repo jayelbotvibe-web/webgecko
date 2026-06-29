@@ -102,6 +102,25 @@ class Element(Page):
         self.encoding = "utf-8"
         self._root = el
 
+    @property
+    def parent(self) -> Element | None:
+        p = self._root.getparent()
+        return Element(p) if p is not None else None
+
+    @property
+    def children(self) -> Elements:
+        return Elements([Element(c) for c in self._root.getchildren()])
+
+    @property
+    def next_sibling(self) -> Element | None:
+        n = self._root.getnext()
+        return Element(n) if n is not None else None
+
+    @property
+    def prev_sibling(self) -> Element | None:
+        p = self._root.getprevious()
+        return Element(p) if p is not None else None
+
     def __repr__(self) -> str:
         cls = self._root.attrib.get("class", "")
         id_ = self._root.attrib.get("id", "")
