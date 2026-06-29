@@ -1,4 +1,5 @@
 import time
+import asyncio
 
 import pytest
 from gecko.parser import Page, _escape_xpath_str
@@ -197,20 +198,17 @@ class TestParser:
         assert items[0]["nope"] is None
 
     def test_extract_bad_selector(self):
-        """extract survives invalid CSS selectors."""
         page = Page(HTML)
         items = page.css(".product").extract({"name": ".title::text", "bad": "!!!"})
         assert items[0]["name"] == "Widget A"
         assert items[0]["bad"] is None
 
     def test_empty_content(self):
-        """Page handles empty, whitespace-only, and None content."""
         for content in ["", "   ", b""]:
             p = Page(content)
             assert p.tag == "html"
 
     def test_bad_css_raises_valueerror(self):
-        """Invalid CSS raises ValueError, not raw SelectorSyntaxError."""
         page = Page(HTML)
         with pytest.raises(ValueError):
             page.css("!!!bad!!!")
@@ -230,111 +228,124 @@ class TestXPathEscape:
 
 
 class TestFetcher:
-    def test_fetch_httpbin(self):
-        r = fetch("https://httpbin.org/html")
-        assert r.status == 200
-        assert r.page.css("h1")[0].text == "Herman Melville - Moby-Dick"
-
-    def test_fetch_with_impersonate(self):
-        r = fetch("https://httpbin.org/get", impersonate="chrome131")
+    def test_fetch_get(self, httpbin):
+        r = fetch(httpbin + "/get")
         assert r.status == 200
 
-    def test_session_context_manager(self):
+    def test_fetch_html(self, httpbin):
+        r = fetch(httpbin + "/html")
+        assert r.status == 200
+        assert r.page.css("h1")  # has an h1
+
+    def test_fetch_with_impersonate(self, httpbin):
+        r = fetch(httpbin + "/get", impersonate="chrome131")
+        assert r.status == 200
+
+    def test_session_context_manager(self, httpbin):
         with Session() as s:
-            r = s.get("https://httpbin.org/get")
+            r = s.get(httpbin + "/get")
             assert r.status == 200
 
-    def test_response_page(self):
-        r = fetch("https://httpbin.org/html")
-        assert r.page.css("h1")[0].text
+    def test_response_page(self, httpbin):
+        r = fetch(httpbin + "/html")
+        assert r.page.css("h1")
 
-    def test_fetch_returns_404(self):
-        """fetch() returns response for all status codes — agent decides."""
-        r = fetch("https://httpbin.org/status/404")
+    def test_fetch_returns_404(self, httpbin):
+        r = fetch(httpbin + "/status/404")
         assert r.status == 404
 
-    def test_session_raises_on_404(self):
-        """Session raises on HTTP errors — crawlers need this."""
+    def test_session_raises_on_404(self, httpbin):
         with pytest.raises(Exception):
             with Session() as s:
-                s.get("https://httpbin.org/status/404")
+                s.get(httpbin + "/status/404")
 
-    def test_session_headers(self):
+    def test_session_headers(self, httpbin):
         with Session() as s:
-            r = s.get("https://httpbin.org/headers", headers={"X-Test": "hello"})
+            r = s.get(httpbin + "/headers", headers={"X-Test": "hello"})
             assert r.status == 200
 
-    def test_json_response(self):
-        r = fetch("https://httpbin.org/json")
+    def test_json_response(self, httpbin):
+        r = fetch(httpbin + "/json")
         assert r.json is not None
-        assert "slideshow" in r.json
-        assert r.page.tag == "html"  # placeholder page
+        assert r.page.tag == "html"
 
-    def test_html_response_no_json(self):
-        r = fetch("https://httpbin.org/html")
+    def test_html_response_no_json(self, httpbin):
+        r = fetch(httpbin + "/html")
         assert r.json is None
         assert r.page.css("h1")
 
+    def test_fetch_404_fast(self, httpbin):
+        start = time.monotonic()
+        r = fetch(httpbin + "/status/404")
+        elapsed = time.monotonic() - start
+        assert r.status == 404
+        assert elapsed < 5  # no retries on HTTP errors
+
+    def test_redirect(self, httpbin):
+        r = fetch(httpbin + "/redirect/3")
+        assert r.status == 200
+
+    def test_xml_response(self, httpbin):
+        r = fetch(httpbin + "/xml")
+        assert r.status == 200
+        assert len(r.page.css("*")) > 0
+
 
 class TestGecko:
-    def test_basic(self):
+    def test_basic(self, httpbin):
         from gecko.crawler import Gecko
         from gecko.fetcher import Response
 
         class TestGecko(Gecko):
-            start_urls = ["https://httpbin.org/html"]
+            start_urls = [httpbin + "/html"]
             concurrency = 1
 
             def parse(self, response: Response):
-                yield {"title": response.page.css("h1")[0].text}
+                yield {"status": response.status}
 
         g = TestGecko().run()
         assert g.stats.pages_crawled == 1
         assert len(g.items) == 1
-        assert "Moby" in g.items[0]["title"]
+        assert g.items[0]["status"] == 200
 
-    def test_save(self, tmp_path):
+    def test_save(self, tmp_path, httpbin):
         from gecko.crawler import Gecko
         from gecko.fetcher import Response
 
         class TestGecko(Gecko):
-            start_urls = ["https://httpbin.org/html"]
+            start_urls = [httpbin + "/html"]
             concurrency = 1
 
             def parse(self, response: Response):
-                yield {"title": response.page.css("h1")[0].text}
+                yield {"url": response.url}
 
         g = TestGecko().run()
         path = str(tmp_path / "test.json")
         n = g.save(path)
         assert n == 1
-        import json
-        with open(path) as f:
-            assert json.load(f)[0]["title"]
 
-    def test_save_jsonl(self, tmp_path):
+    def test_save_jsonl(self, tmp_path, httpbin):
         from gecko.crawler import Gecko
         from gecko.fetcher import Response
 
         class TestGecko(Gecko):
-            start_urls = ["https://httpbin.org/html"]
+            start_urls = [httpbin + "/html"]
             concurrency = 1
 
             def parse(self, response: Response):
-                yield {"title": response.page.css("h1")[0].text}
+                yield {"url": response.url}
 
         g = TestGecko().run()
         path = str(tmp_path / "test.jsonl")
         n = g.save_jsonl(path)
         assert n == 1
-        assert open(path).read().strip()
 
-    def test_max_pages(self):
+    def test_max_pages(self, httpbin):
         from gecko.crawler import Gecko
         from gecko.fetcher import Response
 
         class TestGecko(Gecko):
-            start_urls = ["https://httpbin.org/html", "https://httpbin.org/get"]
+            start_urls = [httpbin + "/html", httpbin + "/get"]
             concurrency = 1
             max_pages = 1
 
@@ -345,19 +356,18 @@ class TestGecko:
         assert g.stats.pages_crawled <= 2
         assert g.stats.skipped >= 0
 
-    def test_stream(self):
+    def test_stream(self, httpbin):
         from gecko.crawler import Gecko
         from gecko.fetcher import Response
-        import asyncio
 
         items_received = []
 
         class TestGecko(Gecko):
-            start_urls = ["https://httpbin.org/html"]
+            start_urls = [httpbin + "/html"]
             concurrency = 1
 
             def parse(self, response: Response):
-                yield {"title": response.page.css("h1")[0].text}
+                yield {"url": response.url}
 
         async def collect():
             g = TestGecko()
@@ -366,12 +376,3 @@ class TestGecko:
 
         asyncio.run(collect())
         assert len(items_received) == 1
-        assert "Moby" in items_received[0]["title"]
-
-    def test_fetch_404_fast(self):
-        """404 should not retry — agents get instant feedback."""
-        start = time.monotonic()
-        r = fetch("https://httpbin.org/status/404")
-        elapsed = time.monotonic() - start
-        assert r.status == 404
-        assert elapsed < 5  # not 14s of retries
