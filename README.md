@@ -13,6 +13,8 @@
 
 **What it doesn't:** Browser automation, JavaScript rendering, proxy rotation, CAPTCHA solving. This is a library, not a scraping framework.
 
+![Demo](demo.svg)
+
 ```python
 from gecko import fetch
 

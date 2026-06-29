@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="780" height="520" viewBox="0 0 780 520">
+  <defs>
+    <style>
+      text { font-family: 'Courier New', Consolas, monospace; font-size: 14px; }
+      .prompt { fill: #3fb950; }
+      .output { fill: #e6edf3; }
+      .comment { fill: #8b949e; }
+      .keyword { fill: #ff7b72; }
+      .string { fill: #a5d6ff; }
+      .number { fill: #79c0ff; }
+      .method { fill: #d2a8ff; }
+    </style>
+  </defs>
+
+  <!-- Terminal background -->
+  <rect width="780" height="520" rx="8" fill="#0d1117"/>
+  <rect width="780" height="32" rx="8" fill="#161b22"/>
+  <rect y="32" width="780" height="1" fill="#21262d"/>
+
+  <!-- Window control dots -->
+  <circle cx="16" cy="16" r="6" fill="#f85149"/>
+  <circle cx="38" cy="16" r="6" fill="#f0883e"/>
+  <circle cx="60" cy="16" r="6" fill="#3fb950"/>
+
+  <!-- Title -->
+  <text x="390" y="21" text-anchor="middle" fill="#8b949e" font-size="12">Terminal — webgecko demo</text>
+
+  <!-- Line 1 -->
+  <text x="20" y="62" class="prompt">$</text>
+  <text x="38" y="62" class="output">python3</text>
+
+  <!-- Line 2 -->
+  <text x="20" y="86" class="prompt">&gt;&gt;&gt;</text>
+  <text x="52" y="86" class="keyword">from</text>
+  <text x="88" y="86" class="output">gecko</text>
+  <text x="134" y="86" class="keyword">import</text>
+  <text x="186" y="86" class="output">fetch</text>
+
+  <!-- Line 3 -->
+  <text x="20" y="110" class="prompt">&gt;&gt;&gt;</text>
+  <text x="52" y="110" class="output">r = fetch(</text>
+  <text x="142" y="110" class="string">"https://quotes.toscrape.com"</text>
+  <text x="364" y="110" class="output">, impersonate=</text>
+  <text x="504" y="110" class="string">"chrome131"</text>
+  <text x="618" y="110" class="output">)</text>
+
+  <!-- Line 4 -->
+  <text x="20" y="134" class="prompt">&gt;&gt;&gt;</text>
+  <text x="52" y="134" class="output">r.status</text>
+
+  <!-- Line 5 -->
+  <text x="20" y="158" class="number">200</text>
+
+  <!-- Line 6 -->
+  <text x="20" y="182" class="prompt">&gt;&gt;&gt;</text>
+  <text x="52" y="182" class="output">r.page.title</text>
+
+  <!-- Line 7 -->
+  <text x="20" y="206" class="string">'Quotes to Scrape'</text>
+
+  <!-- Line 8 -->
+  <text x="20" y="230" class="prompt">&gt;&gt;&gt;</text>
+  <text x="52" y="230" class="output">r.page.css(</text>
+  <text x="166" y="230" class="string">".quote"</text>
+  <text x="234" y="230" class="output">).extract({</text>
+  <text x="324" y="230" class="string">"text"</text>
+  <text x="378" y="230" class="output">:</text>
+
+  <text x="394" y="250" class="string">".text::text"</text>
+  <text x="506" y="250" class="output">,</text>
+
+  <text x="340" y="270" class="string">"author"</text>
+  <text x="410" y="270" class="output">:</text>
+  <text x="426" y="270" class="string">".author::text"</text>
+
+  <text x="568" y="290" class="output">})</text>
+
+  <!-- Line 12 — result header -->
+  <text x="20" y="318" class="output">[</text>
+  <text x="28" y="338" class="string">"text"</text>
+  <text x="74" y="338" class="output">:</text>
+  <text x="84" y="338" class="string">"The world as we have created it is a process..."</text>
+  <text x="466" y="338" class="output">,</text>
+
+  <text x="46" y="358" class="string">"author"</text>
+  <text x="116" y="358" class="output">:</text>
+  <text x="126" y="358" class="string">"Albert Einstein"</text>
+
+  <text x="20" y="378" class="output">},</text>
+  <text x="20" y="398" class="output">...</text>
+  <text x="20" y="418" class="output">]</text>
+
+  <!-- Line 16 — links -->
+  <text x="20" y="450" class="prompt">&gt;&gt;&gt;</text>
+  <text x="52" y="450" class="method">len</text>
+  <text x="76" y="450" class="output">(r.page.links())</text>
+
+  <text x="20" y="474" class="number">51</text>
+
+  <!-- Line 17 — test suite -->
+  <text x="20" y="506" class="prompt">&gt;&gt;&gt;</text>
+  <text x="52" y="506" class="output"># 91 tests passed in 0.64s</text>
+
+</svg>
