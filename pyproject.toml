@@ -6,13 +6,34 @@ build-backend = "setuptools.build_meta"
 name = "webgecko"
 version = "0.1.0"
 description = "Fast, stealthy web scraping — HTTP fetching with TLS impersonation, HTML parsing, and concurrent crawling. No fluff."
+readme = "README.md"
 requires-python = ">=3.10"
+authors = [
+    {name = "jayelbotvibe"},
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: WWW/HTTP",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
 dependencies = [
     "lxml>=6.0",
     "cssselect>=1.4",
     "curl_cffi>=0.15",
     "anyio>=4.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/jayelbotvibe-web/webgecko"
+Repository = "https://github.com/jayelbotvibe-web/webgecko"
+Issues = "https://github.com/jayelbotvibe-web/webgecko/issues"
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-asyncio", "pytest-httpbin"]

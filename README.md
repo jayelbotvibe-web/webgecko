@@ -2,8 +2,15 @@
 
 > Pluck what you need. Climb through the web.
 
+[![Tests](https://github.com/jayelbotvibe-web/webgecko/actions/workflows/test.yml/badge.svg)](https://github.com/jayelbotvibe-web/webgecko/actions/workflows/test.yml)
+[![PyPI](https://img.shields.io/pypi/v/webgecko)](https://pypi.org/project/webgecko/)
+[![Python](https://img.shields.io/pypi/pyversions/webgecko)](https://pypi.org/project/webgecko/)
+[![License](https://img.shields.io/github/license/jayelbotvibe-web/webgecko)](https://github.com/jayelbotvibe-web/webgecko/blob/master/LICENSE)
+
+**Web Gecko** is a fast, minimalist web scraping library built for AI agents. TLS impersonation, CSS/XPath parsing, markdown conversion, concurrent crawling — no browser automation, no bloat.
+
 ```python
-from gecko import fetch, Session, Gecko, Response
+from gecko import fetch
 
 r = fetch("https://httpbin.org/html", impersonate="chrome131")
 print(r.page.title)
