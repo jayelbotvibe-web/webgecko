@@ -7,7 +7,11 @@
 [![Python](https://img.shields.io/pypi/pyversions/webgecko)](https://pypi.org/project/webgecko/)
 [![License](https://img.shields.io/github/license/jayelbotvibe-web/webgecko)](https://github.com/jayelbotvibe-web/webgecko/blob/master/LICENSE)
 
-**Web Gecko** is a fast, minimalist web scraping library built for AI agents. TLS impersonation, CSS/XPath parsing, markdown conversion, concurrent crawling — no browser automation, no bloat.
+**Web Gecko** is a point-solution library — stealthy HTTP + HTML parsing for when you need to scrape a site that blocks plain `curl` or `requests` but doesn't require JavaScript. Built for AI agents that want structured data without writing parsing loops.
+
+**What it does:** TLS impersonation, CSS/XPath with pseudo-elements, markdown conversion, structured extraction, concurrent crawling.
+
+**What it doesn't:** Browser automation, JavaScript rendering, proxy rotation, CAPTCHA solving. This is a library, not a scraping framework.
 
 ```python
 from gecko import fetch
