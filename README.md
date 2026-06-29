@@ -6,23 +6,8 @@
 from gecko import fetch, Session, Gecko, Response
 
 r = fetch("https://httpbin.org/html", impersonate="chrome131")
-print(r.page.css("h1::text").get())
-
-class QuotesGecko(Gecko):
-    start_urls = ["https://quotes.toscrape.com/"]
-    concurrency = 4
-
-    def parse(self, response: Response):
-        yield from response.page.css(".quote").extract({
-            "text": ".text::text",
-            "author": ".author::text",
-        })
-        next_link = response.page.css(".next a::attr(href)").get()
-        if next_link:
-            yield response.follow(next_link, callback=self.parse)
-
-result = QuotesGecko().run()  # 100 quotes, 10 pages, ~3s
-result.save("quotes.json")
+print(r.page.title)
+print(r.page.markdown[:200])
 ```
 
 ## Install
@@ -77,10 +62,15 @@ el.text            # text content
 el.tag             # "div"
 el.html            # inner HTML
 el.attr("href")    # attribute value
+```
 
-# List comprehensions for bulk extraction
-[e.text for e in page.css(".title")]
-[e.attr("id") for e in page.css(".product")]
+### Agent-friendly shortcuts
+
+```python
+page.title         # "My Page" — <title> text
+page.markdown      # full page as markdown
+page.links()       # [{"text": "Link A", "href": "/a"}, ...]
+page.jsonld()      # [{"@type": "WebSite", ...}] — JSON-LD data
 ```
 
 ### Extract (agent-friendly structured output)
@@ -102,25 +92,21 @@ page.css("h1").extract({"title": "::text"}, first=True)
 ### Gecko
 
 ```python
-class MyGecko(Gecko):
-    start_urls = ["https://example.com"]
+class QuotesGecko(Gecko):
+    start_urls = ["https://quotes.toscrape.com/"]
     concurrency = 4
-    download_delay = 0.5
-    max_pages = 100
 
     def parse(self, response: Response):
-        yield from response.page.css("a").extract({
-            "url": "::attr(href)",
-            "text": "::text",
+        yield from response.page.css(".quote").extract({
+            "text": ".text::text",
+            "author": ".author::text",
         })
-        next_page = response.page.css(".next a::attr(href)").get()
-        if next_page:
-            yield response.follow(next_page, callback=self.parse)
+        next_link = response.page.css(".next a::attr(href)").get()
+        if next_link:
+            yield response.follow(next_link, callback=self.parse)
 
-gecko = MyGecko().run()
-gecko.items          # list[dict]
-gecko.save("out.json")
-gecko.save_jsonl("out.jsonl")
+result = QuotesGecko().run()  # 100 quotes, 10 pages, ~3s
+result.save("quotes.json")
 ```
 
 ## License

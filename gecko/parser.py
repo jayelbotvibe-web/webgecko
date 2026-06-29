@@ -1,8 +1,10 @@
-"""HTML parser — CSS selectors, XPath, text search."""
+"""HTML parser — CSS selectors, XPath, text search, markdown conversion."""
 from __future__ import annotations
 
+import json as _json
 import re
 from typing import Any
+from urllib.parse import urljoin as _urljoin
 
 from cssselect import GenericTranslator
 from lxml.etree import XPath, tostring
@@ -20,6 +22,152 @@ def _escape_xpath_str(s: str) -> str:
     return "concat(" + ", ".join(f'"{part}"' for part in s.split('"')) + ")"
 
 
+# ── markdown converter ──────────────────────────────────────────────
+
+_BLOCK_TAGS = frozenset({"p", "div", "section", "article", "main", "aside", "header",
+                          "footer", "nav", "form", "fieldset", "figure", "figcaption",
+                          "details", "summary", "dialog", "address"})
+_HEADING_TAGS = frozenset({"h1", "h2", "h3", "h4", "h5", "h6"})
+_LIST_TAGS = frozenset({"ul", "ol", "li"})
+_VOID_TAGS = frozenset({"br", "hr", "img", "input", "meta", "link"})
+_SKIP_TAGS = frozenset({"script", "style", "noscript", "head", "title", "template"})
+
+
+def _inline_text(el: HtmlElement, base_url: str) -> str:
+    """Collect inline text from an element, including tail text."""
+    tag = el.tag
+    if tag in _SKIP_TAGS:
+        return ""
+    parts = []
+    t = (el.text or "")
+    if t.strip():
+        parts.append(t)
+    for child in el:
+        parts.append(_inline_text(child, base_url))
+        tail = (child.tail or "")
+        if tail.strip():
+            parts.append(tail)
+    text = "".join(parts).strip()
+
+    if not text:
+        if tag == "br":
+            return "\n"
+        if tag == "img":
+            alt = el.attrib.get("alt", "")
+            src = _urljoin(base_url, el.attrib.get("src", ""))
+            return f"![{alt}]({src})"
+        return ""
+
+    if tag in _HEADING_TAGS:
+        level = int(tag[1])
+        return f"{'#' * level} {text}\n\n"
+    if tag == "li":
+        return text
+    if tag in ("strong", "b"):
+        return f"**{text}**"
+    if tag in ("em", "i"):
+        return f"*{text}*"
+    if tag == "code":
+        return f"`{text}`"
+    if tag in ("del", "s"):
+        return f"~~{text}~~"
+    if tag == "a":
+        href = _urljoin(base_url, el.attrib.get("href", ""))
+        return f"[{text}]({href})"
+    return text
+
+
+def _md(el: HtmlElement, base_url: str = "") -> str:
+    tag = el.tag
+    if tag in _SKIP_TAGS:
+        return ""
+
+    # void tags — no children, render immediately
+    if tag == "br":
+        return "\n"
+    if tag == "hr":
+        return "---\n\n"
+    if tag == "img":
+        alt = el.attrib.get("alt", "")
+        src = _urljoin(base_url, el.attrib.get("src", ""))
+        return f"![{alt}]({src})"
+
+    children = list(el)
+
+    # headings / list items / inline wrappers — use _inline_text for text content
+    if tag in _HEADING_TAGS:
+        return _inline_text(el, base_url)
+    if tag in ("strong", "b", "em", "i", "code", "del", "s", "a"):
+        return _inline_text(el, base_url)
+
+    # lists
+    if tag in ("ul", "ol"):
+        items = []
+        for li in children:
+            if not isinstance(li, HtmlElement) or li.tag != "li":
+                continue
+            li_text = _inline_text(li, base_url)
+            if not li_text:
+                continue
+            if tag == "ul":
+                items.append(f"- {li_text}")
+            else:
+                items.append(f"1. {li_text}")
+        return "\n".join(items) + "\n\n" if items else ""
+
+    # li handled inline
+    if tag == "li":
+        return _inline_text(el, base_url)
+
+    # pre > code blocks
+    if tag == "pre":
+        code_el = el.find("code")
+        if code_el is not None:
+            lang = code_el.attrib.get("class", "").replace("language-", "")
+            inner = code_el.text or ""
+            for c in code_el:
+                inner += "".join(c.itertext())
+                inner += c.tail or ""
+        else:
+            lang = ""
+            inner = el.text or ""
+        return f"```{lang}\n{inner.strip()}\n```\n\n"
+
+    # blockquote
+    if tag == "blockquote":
+        inner = _block_children(el, base_url)
+        return "\n".join(f"> {line}" for line in inner.split("\n")) + "\n\n" if inner.strip() else ""
+
+    # block containers and fallback
+    return _block_children(el, base_url)
+
+
+def _block_children(el: HtmlElement, base_url: str) -> str:
+    """Process children of a block element, capturing text and tails."""
+    parts = []
+    t = (el.text or "").strip()
+    if t:
+        parts.append(t + "\n\n")
+    for child in el:
+        parts.append(_md(child, base_url))
+        tail = (child.tail or "").strip()
+        if tail:
+            parts.append(tail + "\n\n")
+    joined = "".join(parts).strip()
+    return joined + "\n\n" if joined else ""
+
+
+def _html_to_md(html_el: HtmlElement, base_url: str = "") -> str:
+    """Convert an lxml HtmlElement tree to markdown."""
+    body = html_el.find("body") if html_el.tag == "html" else html_el
+    if body is None:
+        body = html_el
+    return _block_children(body, base_url).strip()
+
+
+# ── Page / Element / Elements ────────────────────────────────────────
+
+
 class Page:
     __slots__ = ("_root", "url", "encoding")
 
@@ -33,6 +181,8 @@ class Page:
         if not content.strip():
             content = "<html></html>"
         self._root = document_fromstring(content, parser=HTMLParser(encoding=encoding))
+
+    # ── query methods ────────────────────────────────────────────────
 
     def css(self, selector: str) -> Elements:
         m = _PSEUDO.search(selector)
@@ -82,6 +232,8 @@ class Page:
             parts.append("[" + " and ".join(conditions) + "]")
         return self.xpath("".join(parts))
 
+    # ── properties ───────────────────────────────────────────────────
+
     @property
     def text(self) -> str:
         return "".join(self._root.itertext()).strip()
@@ -94,8 +246,47 @@ class Page:
     def tag(self) -> str:
         return self._root.tag
 
+    @property
+    def title(self) -> str:
+        t = self.css("title::text").get()
+        return str(t) if t else ""
+
+    @property
+    def markdown(self) -> str:
+        return _html_to_md(self._root, self.url)
+
     def attr(self, name: str, default: str | None = None) -> str | None:
         return self._root.attrib.get(name, default)
+
+    # ── convenience methods ──────────────────────────────────────────
+
+    def links(self, *, base_url: str | None = None) -> list[dict[str, str]]:
+        """Return all links as [{"text": ..., "href": ...}]."""
+        base = base_url or self.url
+        results = []
+        for a in self._root.iter("a"):
+            href = a.attrib.get("href", "")
+            if base and href and not href.startswith(("http://", "https://", "#", "javascript:", "mailto:")):
+                href = _urljoin(base, href)
+            text = re.sub(r"\s+", " ", "".join(a.itertext())).strip()
+            if href or text:
+                results.append({"text": text, "href": href})
+        return results
+
+    def jsonld(self) -> list[dict]:
+        """Extract JSON-LD structured data from <script type='application/ld+json'>."""
+        results = []
+        for script in self._root.iter("script"):
+            if script.attrib.get("type") == "application/ld+json":
+                try:
+                    data = _json.loads(script.text or "")
+                except (_json.JSONDecodeError, TypeError):
+                    continue
+                if isinstance(data, list):
+                    results.extend(data)
+                elif isinstance(data, dict):
+                    results.append(data)
+        return results
 
     def __repr__(self) -> str:
         return f"Page({self.tag}{f' url={self.url!r}' if self.url else ''})"

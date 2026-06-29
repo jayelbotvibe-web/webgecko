@@ -376,3 +376,213 @@ class TestGecko:
 
         asyncio.run(collect())
         assert len(items_received) == 1
+
+
+# ── New features: markdown, links, title, jsonld ─────────────────────
+
+
+class TestMarkdown:
+    def test_headings(self):
+        page = Page("<h1>Title</h1><h2>Sub</h2><h3>Deep</h3>")
+        md = page.markdown
+        assert md == "# Title\n\n## Sub\n\n### Deep"
+
+    def test_paragraphs(self):
+        page = Page("<p>Hello world</p><p>Second para</p>")
+        md = page.markdown
+        assert "Hello world" in md
+        assert "Second para" in md
+
+    def test_links(self):
+        page = Page('<a href="/page">Click here</a>', url="https://example.com")
+        md = page.markdown
+        assert "[Click here](https://example.com/page)" in md
+
+    def test_bold_italic(self):
+        page = Page("<strong>bold</strong> <em>italic</em> <b>b</b> <i>i</i>")
+        md = page.markdown
+        assert "**bold**" in md
+        assert "*italic*" in md
+
+    def test_lists(self):
+        page = Page("<ul><li>a</li><li>b</li></ul><ol><li>1</li><li>2</li></ol>")
+        md = page.markdown
+        assert "- a" in md
+        assert "- b" in md
+        assert "1. 1" in md
+        assert "1. 2" in md
+
+    def test_code_inline(self):
+        page = Page("<p>Use <code>fetch()</code> to get pages</p>")
+        md = page.markdown
+        assert "`fetch()`" in md
+
+    def test_code_block(self):
+        page = Page('<pre><code class="language-python">print("hi")</code></pre>')
+        md = page.markdown
+        assert "```python" in md
+        assert 'print("hi")' in md
+        assert md.endswith("```")
+
+    def test_images(self):
+        page = Page('<img src="/logo.png" alt="Logo">', url="https://example.com")
+        md = page.markdown
+        assert "![Logo](https://example.com/logo.png)" in md
+
+    def test_blockquote(self):
+        page = Page("<blockquote><p>famous quote</p></blockquote>")
+        md = page.markdown
+        assert "> famous quote" in md
+
+    def test_strikethrough(self):
+        page = Page("<del>old</del> and <s>gone</s>")
+        md = page.markdown
+        assert "~~old~~" in md
+        assert "~~gone~~" in md
+
+    def test_hr(self):
+        page = Page("<p>above</p><hr><p>below</p>")
+        md = page.markdown
+        assert "---" in md
+
+    def test_empty_page(self):
+        page = Page("<html></html>")
+        assert page.markdown == ""
+
+    def test_script_skipped(self):
+        page = Page("<script>alert('xss')</script><p>safe</p>")
+        md = page.markdown
+        assert "alert" not in md
+        assert "safe" in md
+
+    def test_complex_nesting(self):
+        page = Page(
+            '<article><h1>Blog</h1><p>intro text</p>'
+            '<ul><li>point <strong>one</strong></li></ul></article>'
+        )
+        md = page.markdown
+        assert "# Blog" in md
+        assert "intro text" in md
+        assert "**one**" in md
+
+    def test_empty_paragraph_not_doubled(self):
+        page = Page("<p>a</p><p></p><p>b</p>")
+        md = page.markdown
+        assert md.count("\n\n") <= 2  # not excessive blank lines
+
+    def test_deep_nesting(self):
+        page = Page("<div><div><div><p>deep content</p></div></div></div>")
+        md = page.markdown
+        assert "deep content" in md
+
+    def test_tail_text_captured(self):
+        page = Page("<p>Hello <em>world</em> today</p>")
+        md = page.markdown
+        assert "Hello" in md
+        assert "*world*" in md
+        assert "today" in md
+
+    def test_page_only_body(self):
+        page = Page("<html><head><title>x</title></head><body><p>body only</p></body></html>")
+        md = page.markdown
+        assert "body only" in md
+        assert "x" not in md  # title skipped
+
+
+class TestTitle:
+    def test_title(self):
+        page = Page("<html><head><title>My Page</title></head><body></body></html>")
+        assert page.title == "My Page"
+
+    def test_no_title(self):
+        page = Page("<html><body><p>no title</p></body></html>")
+        assert page.title == ""
+
+    def test_whitespace_title(self):
+        page = Page("<html><head><title>  Spaced  </title></head></html>")
+        assert page.title == "Spaced"
+
+
+class TestLinks:
+    def test_basic(self):
+        page = Page('<a href="/a">Link A</a><a href="/b">Link B</a>', url="https://example.com")
+        links = page.links()
+        assert len(links) == 2
+        assert links[0] == {"text": "Link A", "href": "https://example.com/a"}
+        assert links[1] == {"text": "Link B", "href": "https://example.com/b"}
+
+    def test_no_links(self):
+        page = Page("<p>just text</p>")
+        assert page.links() == []
+
+    def test_absolute_urls_untouched(self):
+        page = Page('<a href="https://other.com/x">External</a>')
+        links = page.links()
+        assert links[0]["href"] == "https://other.com/x"
+
+    def test_skips_javascript(self):
+        page = Page('<a href="javascript:void(0)">JS</a>')
+        links = page.links()
+        assert links[0]["href"] == "javascript:void(0)"  # not resolved
+
+    def test_empty_href(self):
+        page = Page("<a>no href</a>")
+        links = page.links()
+        assert links[0] == {"text": "no href", "href": ""}
+
+    def test_nested_text(self):
+        page = Page('<a href="/x"><strong>bold</strong> text</a>', url="https://e.com")
+        links = page.links()
+        assert links[0]["text"] == "bold text"
+        assert links[0]["href"] == "https://e.com/x"
+
+    def test_base_url_override(self):
+        page = Page('<a href="/path">Link</a>')
+        links = page.links(base_url="https://override.com")
+        assert links[0]["href"] == "https://override.com/path"
+
+
+class TestJsonLD:
+    def test_single_object(self):
+        page = Page(
+            '<script type="application/ld+json">'
+            '{"@context": "https://schema.org", "@type": "WebSite", "name": "Test"}'
+            '</script>'
+        )
+        data = page.jsonld()
+        assert len(data) == 1
+        assert data[0]["@type"] == "WebSite"
+        assert data[0]["name"] == "Test"
+
+    def test_array(self):
+        page = Page(
+            '<script type="application/ld+json">'
+            '[{"@type": "A"}, {"@type": "B"}]'
+            '</script>'
+        )
+        data = page.jsonld()
+        assert len(data) == 2
+
+    def test_multiple_scripts(self):
+        page = Page(
+            '<script type="application/ld+json">{"@type": "One"}</script>'
+            '<script type="application/ld+json">{"@type": "Two"}</script>'
+        )
+        data = page.jsonld()
+        assert len(data) == 2
+
+    def test_no_jsonld(self):
+        page = Page("<html><body>nothing</body></html>")
+        assert page.jsonld() == []
+
+    def test_invalid_json(self):
+        page = Page('<script type="application/ld+json">{bad json}</script>')
+        assert page.jsonld() == []
+
+    def test_empty_script(self):
+        page = Page('<script type="application/ld+json"></script>')
+        assert page.jsonld() == []
+
+    def test_ignores_regular_scripts(self):
+        page = Page('<script>var x = 1;</script>')
+        assert page.jsonld() == []
